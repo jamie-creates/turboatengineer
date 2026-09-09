@@ -10,8 +10,6 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
-    env:
-      SWA_TOKEN: ${{ secrets.AZURE_STATIC_WEB_APPS_API_TOKEN }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -19,16 +17,42 @@ jobs:
           node-version: '24'
           cache: npm
       - run: npm ci
+      - run: npm run lint -- --deny-warnings
       - run: npm test
       - run: npm run build
       - uses: actions/upload-artifact@v4
         with:
           name: turboat-web
           path: dist/client
-      - name: Deploy to Azure
-        if: github.event_name != 'pull_request' && env.SWA_TOKEN != ''
+          if-no-files-found: error
+  deploy:
+    needs: build
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    concurrency:
+      group: azure-production
+      cancel-in-progress: false
+    steps:
+      - name: Check hosting connection
+        id: hosting
         env:
           SWA_TOKEN: ${{ secrets.AZURE_STATIC_WEB_APPS_API_TOKEN }}
+        shell: bash
+        run: |
+          if [ -n "$SWA_TOKEN" ]; then
+            echo "connected=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "connected=false" >> "$GITHUB_OUTPUT"
+            echo "### Build ready; hosting not connected" >> "$GITHUB_STEP_SUMMARY"
+            echo "Download turboat-web from the build artifacts. Configure AZURE_STATIC_WEB_APPS_API_TOKEN and rerun this workflow to publish to Azure." >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - uses: actions/download-artifact@v4
+        if: steps.hosting.outputs.connected == 'true'
+        with:
+          name: turboat-web
+          path: dist/client
+      - name: Deploy to Azure
+        if: steps.hosting.outputs.connected == 'true'
         uses: Azure/static-web-apps-deploy@v1
         with:
           azure_static_web_apps_api_token: ${{ secrets.AZURE_STATIC_WEB_APPS_API_TOKEN }}
@@ -38,3 +62,6 @@ jobs:
           output_location: ''
           skip_app_build: true
           skip_api_build: true
+      - name: Record deployment
+        if: steps.hosting.outputs.connected == 'true'
+        run: echo "### Published to Azure from commit $GITHUB_SHA" >> "$GITHUB_STEP_SUMMARY"

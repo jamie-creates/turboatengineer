@@ -15,6 +15,10 @@ The user selected Azure and supplied anemkai.com and the GitHub repository. No a
 
 The deployment step is skipped when the token is not configured. Builds still produce a downloadable artifact in GitHub Actions.
 
+Build and deployment run as separate jobs. Lint, simulation tests, and the production build must pass before deployment. The deployment token is only supplied to the hosting check and Azure upload; dependency installation and game tests do not receive it. Production uploads run one at a time. The Actions summary explicitly says whether hosting is unconfigured or an upload completed.
+
+For a rollback, revert the problematic change on `main` and push. The same checks and deployment then publish the restored source. Existing installed clients may continue using the previous service worker until all game windows are closed and reopened; local saves remain in the browser.
+
 ## Planned online architecture
 
 - SWA: public application files, HTTPS, custom domain.
