@@ -34,7 +34,9 @@ The Azure deployment artifact is `dist/client`. The build typechecks, exports st
 
 ## Hosting plan
 
-Target: `boats.anemkai.com` (proposed subdomain).
+Target: `anemkai.com` (confirmed).
+
+Azure address: https://red-river-0895c9d1e.5.azurestaticapps.net
 
 The repository is `jamie-creates/turboatengineer`. Its workflow runs tests and builds on pushes and pull requests. Deployment requires an Azure Static Web App and the repository secret `AZURE_STATIC_WEB_APPS_API_TOKEN`.
 
