@@ -327,7 +327,7 @@ export default function Home() {
                   {entrants.opponents.map((o) => (
                     <span key={o.name}>
                       <i style={{ background: o.design.color }} />
-                      {o.name}
+                      {o.name} · {o.style}
                     </span>
                   ))}
                 </div>

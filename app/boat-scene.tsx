@@ -180,6 +180,7 @@ export default function BoatScene({
       water.material = waterMat;
       function createBoat(design: Design, name: string) {
         const paint = mat(name + ' paint', design.color);
+        paint.zOffset = -1;
         const root = new TransformNode(name, scene),
           ratio = design.hull === 'v' ? 0.04 : 0.45;
         function section(row: number) {
@@ -232,6 +233,15 @@ export default function BoatScene({
               );
               if (p.braced)
                 beamBetween('panel brace', front[col], back[col + 1]);
+              if (col !== 1) {
+                const edge = col === 0 ? 0 : 3;
+                const bottom = col === 0 ? 1 : 2;
+                patch('painted sheer stripe', [
+                  front[edge], back[edge],
+                  Vector3.Lerp(back[edge], back[bottom], 0.28),
+                  Vector3.Lerp(front[edge], front[bottom], 0.28),
+                ], paint);
+              }
             }
           }
           beamBetween('station frame', back[0], back[1], 0.014);

@@ -775,6 +775,7 @@ export function readSave(raw: string | null): Save {
 
 export type Opponent = {
   name: string;
+  style: string;
   design: Design;
   elapsedSeconds: number;
   courseKnots: number;
@@ -797,6 +798,17 @@ export function generateOpponents(
     'Silver Minnow',
   ];
   const palette = ['#ea7051', '#71cfb2', '#a899ec'];
+  // Separate silhouettes, sampled without replacement, rather than copies of
+  // the player's hull. Small variations keep repeat races from looking identical.
+  const profiles = [
+    { label: 'Needle racer', hull: 'v' as const, widths: [26, 43, 59, 62, 47], depths: [0.55, 0.7, 0.85, 0.85, 0.75] },
+    { label: 'Wide skiff', hull: 'skiff' as const, widths: [60, 88, 98, 95, 90], depths: [0.4, 0.45, 0.5, 0.5, 0.45] },
+    { label: 'Wave cutter', hull: 'v' as const, widths: [32, 61, 82, 78, 64], depths: [0.75, 0.9, 1.05, 1.05, 0.95] },
+  ];
+  for (let j = profiles.length - 1; j > 0; j--) {
+    const k = Math.min(j, Math.floor(random() * (j + 1)));
+    [profiles[j], profiles[k]] = [profiles[k], profiles[j]];
+  }
   const pick = <T>(items: readonly T[]): T =>
     items[Math.min(items.length - 1, Math.floor(random() * items.length))];
   const pool = materials.map((_, i) => i).filter((i) => materials[i].xp <= xp);
@@ -804,10 +816,11 @@ export function generateOpponents(
     .map((name) => ({ name, sort: random() }))
     .sort((a, b) => a.sort - b.sort);
   return Array.from({ length: count }, (_, i) => {
-    const d: Design = structuredClone(player);
+    const d: Design = structuredClone(initial.design);
+    const profile = profiles[i];
     const material = pick(pool);
     d.material = material;
-    d.hull = random() < 0.5 ? 'v' : 'skiff';
+    d.hull = profile.hull;
     d.color = palette[i];
     // Match the player's engine class, while generating independent tuning.
     // Copying the player's upgrades would cancel the benefit of tuning.
@@ -817,16 +830,16 @@ export function generateOpponents(
         upgrade.xp <= xp && random() < 0.2 ? [index] : [],
       ),
     );
-    d.widths = d.widths.map((w, j) =>
+    d.widths = profile.widths.map((w) =>
       Math.max(
         25,
-        Math.min(100, Math.round(w + (random() - 0.5) * (j === 0 ? 15 : 28))),
+        Math.min(100, Math.round(w + (random() - 0.5) * 4)),
       ),
     );
-    d.depths = d.depths.map((v) =>
+    d.depths = profile.depths.map((v) =>
       Math.max(
         0.35,
-        Math.min(1.1, Math.round((v + (random() - 0.5) * 0.2) * 100) / 100),
+        Math.min(1.2, Math.round((v + (random() - 0.5) * 0.06) * 100) / 100),
       ),
     );
     d.panels = Array.from({ length: 15 }, (_, slot) =>
@@ -850,12 +863,17 @@ export function generateOpponents(
         .filter((n) => unlockReputation(n, 'stern') <= xp),
     );
     if (stats(d).unsafe) {
-      d.widths = [40, 70, 95, 95, 85];
-      d.depths = [0.55, 0.6, 0.7, 0.7, 0.65];
+      // Lighten the structure rather than replacing every silhouette with the
+      // same fallback hull. Preserve the visible design and calculate it again.
+      d.material = 0;
+      d.panels = d.panels.map((p) => p && { material: 0, braced: false });
+      d.seatMaterial = 0;
+      d.sternMaterial = 0;
     }
     const result = race(d, eventId);
     return {
       name: shuffled[i].name,
+      style: profile.label,
       design: d,
       elapsedSeconds: result.elapsedSeconds,
       courseKnots: result.courseKnots,

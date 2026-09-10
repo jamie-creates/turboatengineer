@@ -97,6 +97,26 @@ test('head-to-head finish order and rewards match times', () => {
       r.standings[i].elapsedSeconds >= r.standings[i - 1].elapsedSeconds,
     );
 });
+
+test('rivals have distinct silhouettes even when random draws repeat', () => {
+  for (const draw of [0, 0.5, 0.999]) {
+    for (const xp of [0, 180, 500]) {
+      const player = design();
+      player.widths = [100, 100, 100, 100, 100];
+      const before = structuredClone(player);
+      const rivals = generateOpponents(player, 5, 3, xp, () => draw);
+      assert.equal(new Set(rivals.map((o) => o.style)).size, 3);
+      assert.equal(new Set(rivals.map((o) => JSON.stringify(o.design.widths))).size, 3);
+      assert.equal(new Set(rivals.map((o) => o.design.color)).size, 3);
+      for (const rival of rivals) {
+        assert.notDeepEqual(rival.design.widths, player.widths);
+        assert.equal(stats(rival.design).unsafe, false);
+        assert.ok(Number.isFinite(rival.elapsedSeconds) && rival.elapsedSeconds > 0);
+      }
+      assert.deepEqual(player, before);
+    }
+  }
+});
 test('river current contributes to course speed without inflating through-water speed', () => {
   const r = race(design(), 3);
   assert.ok(r.courseKnots > r.knots);
