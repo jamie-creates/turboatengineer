@@ -1470,3 +1470,41 @@ a.game-tile:hover {
     padding: 25px;
   }
 }
+.race-telemetry {
+  display: flex;
+  gap: 20px;
+  align-items: center;
+  margin-top: 14px;
+  background: #e3efed;
+  border-radius: 8px;
+  padding: 12px;
+}
+.race-telemetry svg {
+  width: 140px;
+  height: 140px;
+  flex-shrink: 0;
+}
+.race-telemetry ol {
+  list-style: decimal;
+  flex: 1;
+  padding-left: 20px;
+  margin: 0;
+}
+.race-telemetry li {
+  padding: 7px 0;
+  font-size: 13px;
+}
+.race-telemetry li span {
+  display: block;
+  color: #466b69;
+  margin-top: 3px;
+}
+@media (max-width: 500px) {
+  .race-telemetry {
+    gap: 8px;
+  }
+  .race-telemetry svg {
+    width: 100px;
+    height: 120px;
+  }
+}

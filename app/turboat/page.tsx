@@ -1,4 +1,5 @@
 /* oxlint-disable react/react-compiler -- Effects hydrate and persist device-local state after SSR; this imperative game does not use React Compiler. */
+/* oxlint-disable jsx-a11y/prefer-tag-over-role -- Inline SVG is the accessible live course visualization. */
 'use client';
 import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
@@ -24,6 +25,9 @@ import {
   events,
   stats,
   runEvent,
+  raceFrame,
+  simulateRace,
+  coursePoint,
   readSave,
   parseSave,
   type Design,
@@ -116,7 +120,7 @@ export default function Home() {
     if (!running) return;
     const start = performance.now();
     const timer = setInterval(() => {
-      const p = Math.min(100, (performance.now() - start) / 140);
+      const p = Math.min(100, (performance.now() - start) / 280);
       setProgress(p);
       if (p >= 100) {
         clearInterval(timer);
@@ -279,6 +283,51 @@ export default function Home() {
       setNotice('That file is not a valid Turboat Engineer save.');
     }
   }
+  const raceTime = entrants
+    ? (Math.max(
+        entrants.elapsedSeconds,
+        ...entrants.opponents.map((o) => o.elapsedSeconds),
+      ) *
+        progress) /
+      100
+    : 0;
+  const liveFrame =
+    entrants && running ? raceFrame(entrants.dynamics, raceTime) : null;
+  const fleet = entrants
+    ? [
+        { name: 'Your boat', color: design.color, dynamics: entrants.dynamics },
+        ...entrants.opponents.map((o) => ({
+          name: o.name,
+          color: o.design.color,
+          dynamics: o.dynamics,
+        })),
+      ]
+        .map((o) => ({ ...o, frame: raceFrame(o.dynamics, raceTime) }))
+        .sort(
+          (a, b) =>
+            b.frame.distance - a.frame.distance ||
+            a.dynamics.duration - b.dynamics.duration,
+        )
+    : [];
+  const trackPoints = Array.from({ length: 101 }, (_, i) =>
+    coursePoint((event.distance * i) / 100, eventId),
+  );
+  const mapMinX = Math.min(...trackPoints.map((p) => p.x)),
+    mapMinZ = Math.min(...trackPoints.map((p) => p.z));
+  const mapScale =
+    130 /
+    Math.max(
+      1,
+      ...trackPoints.map((p) => p.x - mapMinX),
+      ...trackPoints.map((p) => p.z - mapMinZ),
+    );
+  const mapPosition = (distance: number) => {
+    const p = coursePoint(distance, eventId);
+    return {
+      x: 15 + (p.x - mapMinX) * mapScale,
+      y: 145 - (p.z - mapMinZ) * mapScale,
+    };
+  };
   const next = [...materials]
       .sort((a, b) => a.xp - b.xp)
       .find((m) => m.xp > save.xp),
@@ -349,14 +398,16 @@ export default function Home() {
             </div>
             <div className="preview-stats">
               <strong>
-                {testing
-                  ? seaTrial(
-                      design,
-                      event.waves,
-                      event.wind,
-                      throttle,
-                    ).speed.toFixed(1)
-                  : s.knots}
+                {liveFrame
+                  ? (liveFrame.speed * 1.94384).toFixed(1)
+                  : testing
+                    ? seaTrial(
+                        design,
+                        event.waves,
+                        event.wind,
+                        throttle,
+                      ).speed.toFixed(1)
+                    : s.knots}
                 <small>knots / estimated</small>
               </strong>
               <strong>
@@ -544,15 +595,59 @@ export default function Home() {
             <div className="race-progress">
               <p>
                 <span>
-                  {progress < 30
-                    ? 'Leaving the starting line'
-                    : progress < 70
-                      ? 'Testing your hull through the course'
-                      : 'Heading for the finish'}
+                  {liveFrame?.phase} · {Math.round(liveFrame?.distance || 0)} /{' '}
+                  {event.distance} m
                 </span>
-                <b>{Math.round(progress)}%</b>
+                <b>{Math.round(progress)}% · accelerated replay</b>
               </p>
               <Progress value={progress} aria-label="Race progress" />
+              <div className="race-telemetry">
+                <svg
+                  viewBox="0 0 160 160"
+                  role="img"
+                  aria-label="Race course map showing boat positions"
+                >
+                  <polyline
+                    points={trackPoints
+                      .map((_, i) => {
+                        const p = mapPosition((event.distance * i) / 100);
+                        return `${p.x},${p.y}`;
+                      })
+                      .join(' ')}
+                    fill="none"
+                    stroke="#819f9e"
+                    strokeWidth="5"
+                  />
+                  {fleet.map((boat) => {
+                    const p = mapPosition(boat.frame.distance);
+                    return (
+                      <circle
+                        key={boat.name}
+                        cx={p.x}
+                        cy={p.y}
+                        r={boat.name === 'Your boat' ? 5 : 4}
+                        fill={boat.color}
+                        stroke="#123d43"
+                        strokeWidth="1"
+                      >
+                        <title>{boat.name}</title>
+                      </circle>
+                    );
+                  })}
+                </svg>
+                <ol>
+                  {fleet.map((boat) => (
+                    <li key={boat.name}>
+                      <b>{boat.name}</b>
+                      <span>
+                        {boat.frame.phase === 'Finished'
+                          ? 'Finished'
+                          : `${(boat.frame.speed * 1.94384).toFixed(1)} kn · ${boat.frame.phase}`}
+                      </span>
+                    </li>
+                  ))}
+                </ol>
+              </div>
               {entrants && entrants.opponents.length > 0 && (
                 <div className="fleet-list">
                   <span>
@@ -677,8 +772,8 @@ export default function Home() {
                   </h2>
                   <p>
                     {Math.floor(result.elapsedSeconds / 60)}m{' '}
-                    {result.elapsedSeconds % 60}s estimated course time ·{' '}
-                    {result.courseKnots}kn over course
+                    {Math.floor(result.elapsedSeconds % 60)}s simulated course
+                    time · {result.courseKnots}kn over course
                   </p>
                   <p>
                     +{result.credits} credits · +{result.xp} reputation
@@ -708,8 +803,10 @@ export default function Home() {
                         </span>
                         <span>
                           {Math.floor(entry.elapsedSeconds / 60)}:
-                          {String(entry.elapsedSeconds % 60).padStart(2, '0')} ·{' '}
-                          {entry.courseKnots}kn
+                          {String(
+                            Math.floor(entry.elapsedSeconds % 60),
+                          ).padStart(2, '0')}{' '}
+                          · {entry.courseKnots}kn
                         </span>
                       </li>
                     ))}
@@ -720,6 +817,24 @@ export default function Home() {
                 {result.tips.map((t) => (
                   <li key={t}>{t}</li>
                 ))}
+              </ul>
+              <h3>What happened on the course</h3>
+              <ul>
+                <li>
+                  {result.dynamics.accelerationSeconds
+                    ? `Reached 90% of cruising speed in ${result.dynamics.accelerationSeconds} seconds. Less weight or more engine power improves the launch.`
+                    : 'The boat never reached 90% of cruising speed between bends and waves.'}
+                </li>
+                <li>
+                  Average corner speed was {result.dynamics.turnLoss}% below
+                  fast straight sections. Balanced weight and smooth hull lines
+                  help retain speed.
+                </li>
+                <li>
+                  {result.dynamics.impactSeconds > 2
+                    ? 'Wave impacts repeatedly interrupted acceleration. A deep-V hull reduces these impacts.'
+                    : 'Wave interruptions were small on this run.'}
+                </li>
               </ul>
               <h3>What this build taught us</h3>
               <ul>
@@ -743,6 +858,17 @@ export default function Home() {
                       </tr>
                     </thead>
                     <tbody>
+                      <tr>
+                        <td>Simulated course time</td>
+                        <td>
+                          {simulateRace(
+                            comparison.design,
+                            eventId,
+                          ).duration.toFixed(1)}{' '}
+                          s
+                        </td>
+                        <td>{result.elapsedSeconds.toFixed(1)} s</td>
+                      </tr>
                       <tr>
                         <td>Weight</td>
                         <td>{stats(comparison.design).mass} kg</td>
@@ -778,8 +904,8 @@ export default function Home() {
                 </div>
               )}
               <p className="weight-note">
-                Turns and driver mistakes are not yet simulated. This debrief
-                explains estimated hull behavior.
+                Acceleration, bends and wave impacts use the same model as the
+                replay. Collisions and manual steering are not simulated.
               </p>
             </section>
           )}

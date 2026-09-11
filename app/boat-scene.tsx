@@ -19,7 +19,14 @@ import {
   ShaderMaterial,
   Matrix,
 } from '@babylonjs/core';
-import { materials, stats, type Design, type runEvent } from '@/lib/game';
+import {
+  coursePoint,
+  raceFrame,
+  materials,
+  stats,
+  type Design,
+  type runEvent,
+} from '@/lib/game';
 import type { seaTrial } from '@/lib/workshop';
 export default function BoatScene({
   design,
@@ -108,7 +115,8 @@ export default function BoatScene({
       );
       if (!handleDrag.current) camera.attachControl(canvas.current, true);
       camera.lowerRadiusLimit = 6;
-      camera.upperRadiusLimit = 18;
+      camera.upperRadiusLimit = 28;
+      if (live.current.running) camera.radius = 21;
       camera.lowerBetaLimit = 0.2;
       camera.upperBetaLimit = 1.5;
       camera.panningSensibility = 0;
@@ -464,10 +472,11 @@ export default function BoatScene({
             b.position.z -= delta * (test?.speed ?? hydro.knots) * 0.2;
             if (b.position.z < -18) b.position.z = 18;
           });
-          buoys.forEach((b) => {
-            b.position.z -= delta * (test?.speed ?? hydro.knots) * 0.2;
-            if (b.position.z < -24) b.position.z += 48;
-          });
+          if (!live.current.running)
+            buoys.forEach((b) => {
+              b.position.z -= delta * (test?.speed ?? hydro.knots) * 0.2;
+              if (b.position.z < -24) b.position.z += 48;
+            });
         }
         const raceData = entrants;
         const simulatedTime = raceData
@@ -478,21 +487,47 @@ export default function BoatScene({
               live.current.progress) /
             100
           : 0;
+        const playerFrame = raceData
+          ? raceFrame(raceData.dynamics, simulatedTime)
+          : null;
+        const playerPoint = playerFrame
+          ? coursePoint(playerFrame.distance, raceData!.dynamics.eventId)
+          : null;
+        if (live.current.running && raceData && playerPoint && playerFrame) {
+          buoys.forEach((buoy, i) => {
+            const mark =
+              Math.floor(playerFrame.distance / 35) * 35 +
+              (Math.floor(i / 2) - 1) * 35;
+            const p = coursePoint(Math.max(0, mark), raceData.dynamics.eventId),
+              side = i % 2 ? 1 : -1;
+            buoy.position.set(
+              (p.x - playerPoint.x) * 0.18 + Math.cos(p.heading) * side * 8,
+              -0.34,
+              (p.z - playerPoint.z) * 0.18 - Math.sin(p.heading) * side * 8,
+            );
+          });
+        }
         roots.forEach((boat, i) => {
-          if (i > 0) {
-            boat.setEnabled(live.current.running);
-            const opponent = raceData!.opponents[i - 1];
-            const relative =
-              Math.min(1, simulatedTime / opponent.elapsedSeconds) -
-              Math.min(1, simulatedTime / raceData!.elapsedSeconds);
+          if (i > 0) boat.setEnabled(live.current.running);
+          if (live.current.running && raceData && playerPoint) {
+            const trajectory =
+              i === 0 ? raceData.dynamics : raceData.opponents[i - 1].dynamics;
+            const frame = raceFrame(trajectory, simulatedTime),
+              p = coursePoint(frame.distance, trajectory.eventId);
+            const lane = i * 2.5;
             boat.position.set(
-              i * 3,
+              (p.x - playerPoint.x) * 0.18 + Math.cos(p.heading) * lane,
               boatStats[i].physics.freeboard -
                 0.74 +
-                Math.sin(time * 3 + i) * wave * 0.04,
-              relative * 35,
+                Math.sin(simulatedTime * 3 + i) * wave * 0.025 +
+                frame.impact * 0.08,
+              (p.z - playerPoint.z) * 0.18 - Math.sin(p.heading) * lane,
             );
-            boat.rotation.x = moving ? -0.025 : 0;
+            boat.rotation.set(frame.pitch, p.heading, -frame.heel);
+          } else if (i === 0) {
+            boat.position.x = 0;
+            boat.position.z = 0;
+            boat.rotation.y = 0;
           }
           boat.computeWorldMatrix(true);
           waterMat.setMatrix(
@@ -544,9 +579,12 @@ export default function BoatScene({
           const scene = sceneRef.current;
           if (!editMode || !scene || !canvas.current) return;
           const rect = canvas.current.getBoundingClientRect();
-          const px = e.clientX - rect.left, py = e.clientY - rect.top;
+          const px = e.clientX - rect.left,
+            py = e.clientY - rect.top;
           const handle = scene.pick(px, py, (mesh) => !!mesh.metadata?.axis);
-          const picked = handle?.hit ? handle : scene.pick(px, py, (mesh) => mesh.metadata?.slot !== undefined);
+          const picked = handle?.hit
+            ? handle
+            : scene.pick(px, py, (mesh) => mesh.metadata?.slot !== undefined);
           const mesh = picked?.pickedMesh;
           if (!mesh) return;
           const meta = mesh.metadata;

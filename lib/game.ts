@@ -648,13 +648,10 @@ export function race(d: Design, eventId: number) {
   if (result.missing) throw new Error('Close all hull gaps before racing.');
   if (result.unsafe)
     throw new Error('Increase buoyancy or reduce weight before racing.');
+  const dynamics = simulateRace(d, eventId);
+  const elapsedSeconds = dynamics.duration;
   const courseKnots =
-    Math.round(
-      Math.max(0, result.physics.speed + event.current) * 1.94384 * 10,
-    ) / 10;
-  const elapsedSeconds = Math.round(
-    event.distance / Math.max(0.1, result.physics.speed + event.current),
-  );
+    Math.round((event.distance / elapsedSeconds) * 1.94384 * 10) / 10;
   const score = Math.round(
     result.scores.reduce((sum, v, i) => sum + v * event.weights[i], 0),
   );
@@ -702,6 +699,7 @@ export function race(d: Design, eventId: number) {
     tips,
     courseKnots,
     elapsedSeconds,
+    dynamics,
   };
 }
 export function parseSave(raw: string): Save {
@@ -830,6 +828,7 @@ export type Opponent = {
   design: Design;
   elapsedSeconds: number;
   courseKnots: number;
+  dynamics: ReturnType<typeof simulateRace>;
 };
 export function generateOpponents(
   player: Design,
@@ -940,6 +939,7 @@ export function generateOpponents(
       design: d,
       elapsedSeconds: result.elapsedSeconds,
       courseKnots: result.courseKnots,
+      dynamics: result.dynamics,
     };
   });
 }
@@ -978,5 +978,217 @@ export function runEvent(
     xp: count ? [35, 25, 20, 15][place - 1] : base.xp,
     opponents,
     standings,
+  };
+}
+
+// Small deterministic time-step model. Distances are metres, speeds m/s.
+// The same recorded trajectory drives placing, playback and race feedback.
+export type RaceFrame = {
+  time: number;
+  distance: number;
+  speed: number;
+  heel: number;
+  pitch: number;
+  impact: number;
+  phase: string;
+};
+const courseCache = new Map<
+  number,
+  { x: number; z: number; heading: number; curve: number }[]
+>();
+export function coursePoint(distance: number, eventId: number) {
+  const event = events[eventId];
+  if (!event) throw new Error('Unknown event');
+  let points = courseCache.get(eventId);
+  if (!points) {
+    points = [{ x: 0, z: 0, heading: 0, curve: 0 }];
+    const turns = eventId === 1 ? [0.38, 0.72] : [0.22, 0.49, 0.77];
+    for (let m = 1; m <= event.distance; m++) {
+      const fraction = m / event.distance;
+      let curve = 0;
+      turns.forEach((center, i) => {
+        const halfWidth = Math.min(0.055, 30 / event.distance);
+        const u = (fraction - center) / halfWidth;
+        if (Math.abs(u) < 1)
+          curve +=
+            ((i % 2 ? -1 : 1) *
+              (eventId === 4 ? 1.8 : 1.4) *
+              (1 + Math.cos(Math.PI * u))) /
+            (2 * halfWidth * event.distance);
+      });
+      const previous = points[m - 1],
+        heading = previous.heading + curve;
+      points.push({
+        x: previous.x + Math.sin(heading),
+        z: previous.z + Math.cos(heading),
+        heading,
+        curve,
+      });
+    }
+    courseCache.set(eventId, points);
+  }
+  const m = Math.max(0, Math.min(event.distance, distance)),
+    i = Math.floor(m),
+    a = points[i],
+    b = points[Math.min(i + 1, event.distance)],
+    f = m - i;
+  return {
+    x: a.x + (b.x - a.x) * f,
+    z: a.z + (b.z - a.z) * f,
+    heading: a.heading + (b.heading - a.heading) * f,
+    curve: a.curve + (b.curve - a.curve) * f,
+  };
+}
+export function simulateRace(d: Design, eventId: number) {
+  const event = events[eventId];
+  if (!event) throw new Error('Unknown event');
+  const s = stats(d, event.waves, event.wind);
+  if (s.missing || s.unsafe)
+    throw new Error('Boat must be sealed and buoyant.');
+  const top = s.physics.speed,
+    mass = s.mass * 1.2,
+    power = engineSpec(d).hp * 746 * 0.25;
+  const grip = Math.max(
+    0.08,
+    0.22 -
+      Math.abs(s.lateral) * 0.0015 -
+      s.smoothness * 0.001 +
+      (d.hull === 'v' ? 0.015 : 0),
+  );
+  const frames: RaceFrame[] = [
+    {
+      time: 0,
+      distance: 0,
+      speed: 0,
+      heel: 0,
+      pitch: 0,
+      impact: 0,
+      phase: 'Accelerating',
+    },
+  ];
+  let time = 0,
+    distance = 0,
+    speed = 0,
+    cornerTotal = 0,
+    cornerSamples = 0,
+    straightTotal = 0,
+    straightSamples = 0,
+    impactTotal = 0,
+    accelerationSeconds = 0;
+  const dt = 0.25;
+  while (distance < event.distance && time < 7200) {
+    const curve = coursePoint(distance, eventId).curve;
+    const ahead = coursePoint(
+      Math.min(event.distance, distance + speed * 2),
+      eventId,
+    ).curve;
+    const curvature = Math.max(Math.abs(curve), Math.abs(ahead));
+    const turnLimit =
+      curvature > 0.0001 ? Math.sqrt((9.81 * grip) / curvature) : top;
+    const wavePulse = Math.pow(
+      Math.max(0, Math.sin(distance * 0.21 + eventId)),
+      6,
+    );
+    const impact = Math.min(
+      1,
+      event.waves *
+        wavePulse *
+        (d.hull === 'v' ? 0.25 : 0.5) *
+        (1 + Math.max(0, s.trim) / 150),
+    );
+    const target = Math.min(top, turnLimit) * (1 - impact * 0.28);
+    const thrust = power / Math.max(speed, 3);
+    const resistance = (power / Math.max(0.1, top ** 3)) * speed ** 2;
+    const acceleration =
+      speed > target
+        ? -Math.min(2.5, (speed - target) * 1.8)
+        : Math.min(
+            2.4,
+            (thrust - resistance) / mass,
+            Math.max(0, (target - speed) * 1.5),
+          );
+    const nextSpeed = Math.max(0, speed + acceleration * dt);
+    const advance = Math.max(0.1, (speed + nextSpeed) / 2 + event.current) * dt;
+    const fraction = Math.min(1, (event.distance - distance) / advance);
+    time += dt * fraction;
+    distance = Math.min(event.distance, distance + advance);
+    speed = nextSpeed;
+    if (!accelerationSeconds && speed >= top * 0.9) accelerationSeconds = time;
+    if (Math.abs(curve) > 0.001) {
+      cornerTotal += speed;
+      cornerSamples++;
+    } else if (speed > top * 0.7) {
+      straightTotal += speed;
+      straightSamples++;
+    }
+    impactTotal += impact * dt * fraction;
+    frames.push({
+      time,
+      distance,
+      speed,
+      heel:
+        Math.max(
+          -0.28,
+          Math.min(0.28, ((curve * speed * speed) / 9.81) * 0.7),
+        ) -
+        s.lateral * 0.002,
+      pitch: -acceleration * 0.025 + impact * 0.1,
+      impact,
+      phase:
+        distance === event.distance
+          ? 'Finished'
+          : curvature > 0.001
+            ? 'Cornering'
+            : impact > 0.15
+              ? 'Wave impact'
+              : acceleration > 0.08
+                ? 'Accelerating'
+                : 'Cruising',
+    });
+  }
+  if (distance < event.distance)
+    throw new Error('Boat could not complete the course.');
+  const turnLoss =
+    cornerSamples && straightSamples
+      ? Math.max(
+          0,
+          Math.round(
+            (1 -
+              cornerTotal / cornerSamples / (straightTotal / straightSamples)) *
+              100,
+          ),
+        )
+      : 0;
+  return {
+    frames,
+    duration: time,
+    eventId,
+    turnLoss,
+    accelerationSeconds: Math.round(accelerationSeconds * 10) / 10,
+    impactSeconds: Math.round(impactTotal * 10) / 10,
+  };
+}
+export function raceFrame(
+  dynamics: ReturnType<typeof simulateRace>,
+  time: number,
+): RaceFrame {
+  const frames = dynamics.frames;
+  if (time >= dynamics.duration)
+    return { ...frames[frames.length - 1], speed: 0, phase: 'Finished' };
+  const i = Math.min(frames.length - 1, Math.max(0, Math.floor(time / 0.25))),
+    a = frames[i],
+    b = frames[Math.min(i + 1, frames.length - 1)];
+  const f =
+    b.time === a.time
+      ? 0
+      : Math.max(0, Math.min(1, (time - a.time) / (b.time - a.time)));
+  return {
+    time: Math.min(time, dynamics.duration),
+    distance: a.distance + (b.distance - a.distance) * f,
+    speed: a.speed + (b.speed - a.speed) * f,
+    heel: a.heel + (b.heel - a.heel) * f,
+    pitch: a.pitch + (b.pitch - a.pitch) * f,
+    impact: a.impact + (b.impact - a.impact) * f,
+    phase: a.phase,
   };
 }
