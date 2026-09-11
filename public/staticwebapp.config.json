@@ -21,10 +21,6 @@
     {
       "route": "/turboat",
       "rewrite": "/turboat.html"
-    },
-    {
-      "route": "/turboat/",
-      "rewrite": "/turboat.html"
     }
   ],
   "mimeTypes": {
