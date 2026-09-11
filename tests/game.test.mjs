@@ -62,8 +62,8 @@ test('locked upgrades and unaffordable purchases do nothing', () => {
   assert.equal(purchaseUpgrade(s, 0), s);
 });
 test('premium seats unlock before structural panels', () => {
-  assert.equal(unlockReputation(4, 'seats'), 48);
-  assert.equal(unlockReputation(4, 'hull'), 240);
+  assert.equal(unlockReputation(4, 'seats'), 28);
+  assert.equal(unlockReputation(4, 'hull'), 140);
   assert.ok(unlockReputation(4, 'stern') > unlockReputation(4, 'seats'));
 });
 test('save validation rejects corrupt part references', () => {

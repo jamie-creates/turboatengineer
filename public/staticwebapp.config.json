@@ -1,6 +1,12 @@
 {
   "routes": [
     {
+      "route": "/api/*",
+      "headers": {
+        "Cache-Control": "no-store"
+      }
+    },
+    {
       "route": "/sw.js",
       "headers": {
         "Cache-Control": "no-cache"
@@ -11,6 +17,14 @@
       "headers": {
         "Cache-Control": "no-cache"
       }
+    },
+    {
+      "route": "/turboat",
+      "rewrite": "/turboat.html"
+    },
+    {
+      "route": "/turboat/",
+      "rewrite": "/turboat.html"
     }
   ],
   "mimeTypes": {
@@ -19,5 +33,8 @@
   "globalHeaders": {
     "X-Content-Type-Options": "nosniff",
     "Referrer-Policy": "strict-origin-when-cross-origin"
+  },
+  "platform": {
+    "apiRuntime": "node:22"
   }
 }

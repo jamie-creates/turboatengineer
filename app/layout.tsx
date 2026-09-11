@@ -1,9 +1,9 @@
 import type { Metadata, Viewport } from 'next';
 import './globals.css';
 export const metadata: Metadata = {
-  title: 'Turboat Engineer',
+  title: 'Anemkai · The game room',
   description:
-    'Build your own boat, race the harbor, and unlock better materials.',
+    'Games for curious minds. Build, experiment, and play.',
   manifest: '/manifest.webmanifest',
   appleWebApp: {
     capable: true,

@@ -20,14 +20,17 @@ export default function PanelBuilder({
   owned,
   onDesign,
   disabled,
+  selected,
+  onSelect: setSelected,
 }: {
   design: Design;
   owned: number[];
   onDesign: (d: Partial<Design>) => void;
   disabled: boolean;
+  selected: number;
+  onSelect: (slot: number) => void;
 }) {
   const [tool, setTool] = useState<Tool>({ kind: 'select' }),
-    [selected, setSelected] = useState(13),
     [ghost, setGhost] = useState<Drag | null>(null),
     [message, setMessage] = useState(
       'Drag a material onto a hull section. Tap a material, then a section, also works.',

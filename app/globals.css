@@ -1213,3 +1213,260 @@ a {
   gap: 6px;
   align-items: center;
 }
+.workshop-tools {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  border: 0;
+  padding: 14px 0;
+  margin: 0;
+}
+.workshop-tools button,
+.trial-panel button,
+.career-panel button,
+.garage-panel button,
+.cloud-panel button {
+  padding: 10px 15px;
+  border: 1px solid #adc9c9;
+  border-radius: 6px;
+  background: #fff;
+  color: #174341;
+  cursor: pointer;
+  min-height: 44px;
+}
+.workshop-tools button[aria-pressed='true'] {
+  background: #174341;
+  color: white;
+}
+button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+.trial-panel,
+.career-panel,
+.garage-panel,
+.cloud-panel {
+  padding: 24px;
+  margin: 20px 0;
+  border: 1px solid #cfddda;
+  border-radius: 10px;
+  background: #f8fbf9;
+}
+.trial-panel h2,
+.career-panel h2,
+.garage-panel h2,
+.cloud-panel h2 {
+  font-size: 23px;
+  margin: 0 0 8px;
+}
+.trial-panel p,
+.career-panel p,
+.garage-panel p,
+.cloud-panel p {
+  font-size: 14px;
+  line-height: 1.6;
+  margin: 8px 0 14px;
+}
+.trial-panel .primary,
+.cloud-panel .primary {
+  background: #147d78;
+  color: #fff;
+  text-decoration: none;
+  display: inline-flex;
+  padding: 12px 18px;
+  border-radius: 6px;
+}
+.trial-meters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 15px;
+  margin: 18px 0;
+}
+.trial-meters span {
+  flex: 1;
+  min-width: 90px;
+  font-size: 12px;
+  color: #506966;
+}
+.trial-meters b {
+  display: block;
+  color: #163f3c;
+  font-size: 22px;
+}
+.trial-panel li {
+  font-size: 14px;
+  margin: 8px 0;
+}
+.garage-panel fieldset,
+.cloud-panel fieldset {
+  border: 0;
+  padding: 0;
+  margin: 0;
+  min-width: 0;
+}
+.garage-panel label,
+.cloud-panel label,
+.trial-panel label {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  font-size: 14px;
+  margin: 15px 0;
+  max-width: 420px;
+}
+.garage-panel input,
+.cloud-panel input,
+.cloud-panel select {
+  border: 1px solid #aec6c1;
+  border-radius: 5px;
+  background: white;
+  padding: 11px;
+  font: inherit;
+  min-width: 0;
+}
+.garage-panel article,
+.career-panel article {
+  border-top: 1px solid #d5e1de;
+  padding: 19px 0 4px;
+  margin-top: 16px;
+}
+.garage-panel button,
+.cloud-panel button {
+  margin: 4px 6px 4px 0;
+}
+.cloud-panel code {
+  overflow-wrap: anywhere;
+}
+.cloud-panel output,
+.garage-panel output {
+  display: block;
+  margin-top: 14px;
+  font-size: 14px;
+}
+.build-comparison table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 14px;
+}
+.build-comparison th,
+.build-comparison td {
+  text-align: left;
+  padding: 10px;
+  border-bottom: 1px solid #c9ddd6;
+}
+.game-library {
+  max-width: 1120px;
+  margin: auto;
+  padding: 35px 32px 70px;
+}
+.game-library header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 15px;
+  border-bottom: 1px solid #c9d9d3;
+  padding-bottom: 25px;
+  color: #52746b;
+  font-size: 13px;
+}
+.game-library header a {
+  font-weight: 800;
+  letter-spacing: 4px;
+  font-size: 22px;
+  color: #194b42;
+  text-decoration: none;
+}
+.library-intro {
+  padding: 90px 0 50px;
+  max-width: 760px;
+}
+.library-intro h1 {
+  font-size: clamp(40px, 6vw, 68px);
+  line-height: 1.08;
+  letter-spacing: -2px;
+  margin: 20px 0;
+  color: #163f37;
+}
+.library-intro p {
+  font-size: 18px;
+  line-height: 1.7;
+  color: #526f66;
+}
+.game-tiles {
+  display: grid;
+  grid-template-columns: 1.5fr 1fr;
+  gap: 24px;
+}
+.game-tile {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 34px;
+  border: 1px solid #c7dbd3;
+  border-radius: 16px;
+  text-decoration: none;
+  color: #143c34;
+  background: #fff;
+  transition: transform 0.2s;
+}
+a.game-tile:hover {
+  transform: translateY(-4px);
+  border-color: #187f6a;
+}
+.game-tile h2 {
+  font-size: 28px;
+  margin: 0;
+}
+.game-tile p {
+  font-size: 16px;
+  line-height: 1.6;
+  margin: 0;
+  color: #526f66;
+}
+.game-tile > svg {
+  color: #187f6a;
+}
+.game-tile .tile-art {
+  height: 170px;
+  display: grid;
+  place-items: center;
+  background: #dceee5;
+  border-radius: 10px;
+  color: #187f6a;
+}
+.game-tile .tile-action {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-weight: 700;
+  margin-top: auto;
+  padding-top: 15px;
+}
+.game-tile.coming-soon {
+  background: #edf3ef;
+  justify-content: center;
+}
+@media (max-width: 640px) {
+  .game-tiles {
+    grid-template-columns: 1fr;
+  }
+  .game-library {
+    padding: 24px 20px;
+  }
+  .library-intro {
+    padding: 48px 0 30px;
+  }
+  .game-library header span {
+    max-width: 135px;
+    text-align: right;
+  }
+  .trial-panel,
+  .career-panel,
+  .garage-panel,
+  .cloud-panel {
+    padding: 18px;
+  }
+  .game-tile {
+    padding: 25px;
+  }
+}

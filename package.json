@@ -7,7 +7,7 @@
   },
   "scripts": {
     "dev": "vinext dev",
-    "build": "tsc --noEmit && node scripts/build.mjs && node scripts/finish-build.mjs",
+    "build": "tsc --noEmit && node scripts/build.mjs && node scripts/finish-build.mjs && node scripts/build-api.mjs",
     "start": "vinext start",
     "lint": "oxlint app lib scripts tests",
     "format": "oxfmt",

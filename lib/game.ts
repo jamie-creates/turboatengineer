@@ -26,7 +26,7 @@ export const materials = [
     strength: 66,
     beauty: 79,
     cost: 300,
-    xp: 60,
+    xp: 35,
     color: '#e6e9df',
   },
   {
@@ -36,7 +36,7 @@ export const materials = [
     strength: 72,
     beauty: 65,
     cost: 450,
-    xp: 120,
+    xp: 70,
     color: '#b8c9d3',
   },
   {
@@ -46,7 +46,7 @@ export const materials = [
     strength: 83,
     beauty: 88,
     cost: 800,
-    xp: 240,
+    xp: 140,
     color: '#33434d',
   },
   {
@@ -56,7 +56,7 @@ export const materials = [
     strength: 97,
     beauty: 86,
     cost: 1100,
-    xp: 400,
+    xp: 240,
     color: '#839ba7',
   },
   {
@@ -66,7 +66,7 @@ export const materials = [
     strength: 48,
     beauty: 82,
     cost: 160,
-    xp: 30,
+    xp: 15,
     color: '#d2b65e',
   },
   {
@@ -76,7 +76,7 @@ export const materials = [
     strength: 57,
     beauty: 52,
     cost: 210,
-    xp: 45,
+    xp: 25,
     color: '#638f7c',
   },
   {
@@ -86,7 +86,7 @@ export const materials = [
     strength: 61,
     beauty: 71,
     cost: 380,
-    xp: 90,
+    xp: 50,
     color: '#bc9469',
   },
   {
@@ -96,7 +96,7 @@ export const materials = [
     strength: 85,
     beauty: 75,
     cost: 620,
-    xp: 180,
+    xp: 100,
     color: '#69667b',
   },
   {
@@ -106,7 +106,7 @@ export const materials = [
     strength: 92,
     beauty: 73,
     cost: 950,
-    xp: 300,
+    xp: 180,
     color: '#c3a94e',
   },
 ] as const;
@@ -319,6 +319,9 @@ export type Save = {
   ownedSeatMaterials: number[];
   ownedSternMaterials: number[];
   design: Design;
+  garage?: { id: string; name: string; design: Design }[];
+  challenges?: string[];
+  lastRun?: { design: Design; eventId: number; elapsedSeconds: number };
 };
 export const initial: Save = {
   version: 2,
@@ -763,6 +766,54 @@ export function parseSave(raw: string): Save {
     )
   )
     throw new Error('Invalid boatyard save');
+  const validateDesign = (design: Design) =>
+    parseSave(
+      JSON.stringify({
+        ...s,
+        design,
+        garage: undefined,
+        challenges: undefined,
+        lastRun: undefined,
+      }),
+    ).design;
+  if (s.garage !== undefined) {
+    if (!Array.isArray(s.garage) || s.garage.length > 12)
+      throw new Error('Invalid garage');
+    const ids = new Set();
+    for (const boat of s.garage) {
+      if (
+        !boat ||
+        typeof boat.id !== 'string' ||
+        boat.id.length > 80 ||
+        ids.has(boat.id) ||
+        typeof boat.name !== 'string' ||
+        !boat.name.trim() ||
+        boat.name.length > 40
+      )
+        throw new Error('Invalid saved boat');
+      ids.add(boat.id);
+      validateDesign(boat.design);
+    }
+  }
+  if (
+    s.challenges !== undefined &&
+    (!Array.isArray(s.challenges) ||
+      s.challenges.length > 20 ||
+      s.challenges.some(
+        (v: unknown) => typeof v !== 'string' || v.length > 50,
+      ) ||
+      new Set(s.challenges).size !== s.challenges.length)
+  )
+    throw new Error('Invalid career');
+  if (s.lastRun !== undefined) {
+    if (
+      !index(s.lastRun.eventId, events.length) ||
+      !Number.isFinite(s.lastRun.elapsedSeconds) ||
+      s.lastRun.elapsedSeconds <= 0
+    )
+      throw new Error('Invalid previous run');
+    validateDesign(s.lastRun.design);
+  }
   return s;
 }
 export function readSave(raw: string | null): Save {
@@ -801,9 +852,24 @@ export function generateOpponents(
   // Separate silhouettes, sampled without replacement, rather than copies of
   // the player's hull. Small variations keep repeat races from looking identical.
   const profiles = [
-    { label: 'Needle racer', hull: 'v' as const, widths: [26, 43, 59, 62, 47], depths: [0.55, 0.7, 0.85, 0.85, 0.75] },
-    { label: 'Wide skiff', hull: 'skiff' as const, widths: [60, 88, 98, 95, 90], depths: [0.4, 0.45, 0.5, 0.5, 0.45] },
-    { label: 'Wave cutter', hull: 'v' as const, widths: [32, 61, 82, 78, 64], depths: [0.75, 0.9, 1.05, 1.05, 0.95] },
+    {
+      label: 'Needle racer',
+      hull: 'v' as const,
+      widths: [26, 43, 59, 62, 47],
+      depths: [0.55, 0.7, 0.85, 0.85, 0.75],
+    },
+    {
+      label: 'Wide skiff',
+      hull: 'skiff' as const,
+      widths: [60, 88, 98, 95, 90],
+      depths: [0.4, 0.45, 0.5, 0.5, 0.45],
+    },
+    {
+      label: 'Wave cutter',
+      hull: 'v' as const,
+      widths: [32, 61, 82, 78, 64],
+      depths: [0.75, 0.9, 1.05, 1.05, 0.95],
+    },
   ];
   for (let j = profiles.length - 1; j > 0; j--) {
     const k = Math.min(j, Math.floor(random() * (j + 1)));
@@ -831,10 +897,7 @@ export function generateOpponents(
       ),
     );
     d.widths = profile.widths.map((w) =>
-      Math.max(
-        25,
-        Math.min(100, Math.round(w + (random() - 0.5) * 4)),
-      ),
+      Math.max(25, Math.min(100, Math.round(w + (random() - 0.5) * 4))),
     );
     d.depths = profile.depths.map((v) =>
       Math.max(

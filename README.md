@@ -49,3 +49,17 @@ The current build stores progress only in this browser; login and cloud saves ar
 ## Limits
 
 This is an early prototype. Shape editing uses a fixed five-station frame with mirrored sides, not arbitrary CAD topology. Races are compressed visualizations of estimated completion times; solo awards combine four categories. Hydrodynamics and material/tuning coefficients are uncalibrated engineering approximations. Physical iPhone/iPad performance and offline behavior still require device testing.
+
+## Anemkai game library and cloud saves
+
+The root route is the game library; Turboat Engineer lives at `/turboat/`.
+The existing `turboat-save-v2` browser key is retained, so existing players keep progress on the same origin.
+The garage stores up to 12 snapshots. Cloud synchronization is explicit: check the cloud, choose a save, then upload after playing. Concurrent uploads are guarded by Azure Table ETags.
+
+The managed Azure Functions API uses Microsoft SWA identity or separate game accounts. Game accounts use salted scrypt password hashes, secure HttpOnly sessions, account/IP throttling, and one-time recovery codes. Password recovery rotates all sessions. Microsoft and game accounts have separate progress.
+
+Backend configuration: `TURBOAT_STORAGE` is a server-only Azure Table connection string in SWA application settings. The `Turboat` table resides in `turboatsaves4b7d8943` (Standard LRS, metered storage). Never expose the API as an independent unprotected Functions endpoint; Microsoft identity headers are trusted only behind managed SWA. `TURBOAT_ORIGINS` optionally overrides the comma-separated allowed browser origins.
+
+`npm run build` compiles the shared save validator into `api/shared/game.js`. GitHub Actions uploads frontend and API artifacts and Azure builds the API with Node 22. Local static preview supports guest play; cloud login requires the deployed API. Expired session records are rejected on reads; operational cleanup of expired sessions can be added as usage grows.
+
+Sea-trial motion/load indicators and debrief comparisons are estimates derived from the game model, not a calibrated naval simulation. Turning losses are not simulated. Challenge bonuses are one-time; repeated races still give ordinary race rewards.

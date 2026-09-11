@@ -20,29 +20,58 @@ import {
   Matrix,
 } from '@babylonjs/core';
 import { materials, stats, type Design, type runEvent } from '@/lib/game';
+import type { seaTrial } from '@/lib/workshop';
 export default function BoatScene({
   design,
   running,
   waves,
   entrants,
   progress,
+  editMode = false,
+  selectedPanel = 13,
+  onSelectPanel,
+  onDesign,
+  onEditStart,
+  onEditEnd,
+  trial = null,
 }: {
   design: Design;
   running: boolean;
   waves: number;
   entrants: ReturnType<typeof runEvent> | null;
   progress: number;
+  editMode?: boolean;
+  selectedPanel?: number;
+  onSelectPanel?: (slot: number) => void;
+  onDesign?: (patch: Partial<Design>) => void;
+  onEditStart?: () => void;
+  onEditEnd?: () => void;
+  trial?: ReturnType<typeof seaTrial> | null;
 }) {
+  const sceneRef = useRef<Scene | null>(null);
+  const handleDrag = useRef<{
+    row: number;
+    axis: 'width' | 'depth';
+    x: number;
+    y: number;
+    dx: number;
+    dy: number;
+    value: number;
+    design: Design;
+  } | null>(null);
   const canvas = useRef<HTMLCanvasElement>(null),
-    live = useRef({ running, waves, progress });
+    live = useRef({ running, waves, progress, trial });
   const renderer = useRef<Engine | null>(null);
-  useEffect(() => () => {
-    renderer.current?.dispose();
-    renderer.current = null;
-  }, []);
+  useEffect(
+    () => () => {
+      renderer.current?.dispose();
+      renderer.current = null;
+    },
+    [],
+  );
   useEffect(() => {
-    live.current = { running, waves, progress };
-  }, [running, waves, progress]);
+    live.current = { running, waves, progress, trial };
+  }, [running, waves, progress, trial]);
   const cameraState = useRef({
     alpha: -Math.PI * 0.66,
     beta: Math.PI * 0.32,
@@ -53,15 +82,18 @@ export default function BoatScene({
     if (!canvas.current) return;
     let engine: Engine | undefined;
     try {
-      engine = renderer.current ?? new Engine(canvas.current, true, {
-        preserveDrawingBuffer: false,
-        stencil: false,
-      });
+      engine =
+        renderer.current ??
+        new Engine(canvas.current, true, {
+          preserveDrawingBuffer: false,
+          stencil: false,
+        });
       renderer.current = engine;
       engine.setHardwareScalingLevel(
         Math.max(1, (window.devicePixelRatio || 1) / 1.5),
       );
       const scene = new Scene(engine);
+      sceneRef.current = scene;
       scene.clearColor = new Color4(0.065, 0.18, 0.23, 1);
       scene.fogMode = Scene.FOGMODE_EXP2;
       scene.fogDensity = 0.018;
@@ -74,7 +106,7 @@ export default function BoatScene({
         Vector3.Zero(),
         scene,
       );
-      camera.attachControl(canvas.current, true);
+      if (!handleDrag.current) camera.attachControl(canvas.current, true);
       camera.lowerRadiusLimit = 6;
       camera.upperRadiusLimit = 18;
       camera.lowerBetaLimit = 0.2;
@@ -226,21 +258,35 @@ export default function BoatScene({
             const slot = row === 0 ? 1 : row * 3 + col,
               p = design.panels[slot];
             if (p) {
-              patch(
+              const panel = patch(
                 'panel ' + (slot + 1),
                 [front[col], back[col], back[col + 1], front[col + 1]],
                 mats[p.material],
               );
+              if (name === 'Your boat') {
+                panel.metadata = { slot };
+                if (editMode && slot === selectedPanel) {
+                  panel.renderOverlay = true;
+                  panel.overlayColor = new Color3(1, 0.75, 0.15);
+                  panel.overlayAlpha = 0.45;
+                }
+              }
               if (p.braced)
                 beamBetween('panel brace', front[col], back[col + 1]);
               if (col !== 1) {
                 const edge = col === 0 ? 0 : 3;
                 const bottom = col === 0 ? 1 : 2;
-                patch('painted sheer stripe', [
-                  front[edge], back[edge],
-                  Vector3.Lerp(back[edge], back[bottom], 0.28),
-                  Vector3.Lerp(front[edge], front[bottom], 0.28),
-                ], paint);
+                const stripe = patch(
+                  'painted sheer stripe',
+                  [
+                    front[edge],
+                    back[edge],
+                    Vector3.Lerp(back[edge], back[bottom], 0.28),
+                    Vector3.Lerp(front[edge], front[bottom], 0.28),
+                  ],
+                  paint,
+                );
+                if (name === 'Your boat') stripe.metadata = { slot };
               }
             }
           }
@@ -253,6 +299,34 @@ export default function BoatScene({
           }
         }
         const stern = section(4);
+        if (editMode && name === 'Your boat') {
+          const row = Math.floor(selectedPanel / 3);
+          const points = section(row);
+          const gold = mat('width handle', '#ffcf38');
+          const blue = mat('depth handle', '#45ceff');
+          for (const side of [-1, 1]) {
+            const h = MeshBuilder.CreateSphere(
+              'Pull width edge',
+              { diameter: 0.28 },
+              scene,
+            );
+            h.parent = root;
+            h.position.copyFrom(points[side < 0 ? 0 : 3]);
+            h.material = gold;
+            h.metadata = { row, axis: 'width', side };
+          }
+          const h = MeshBuilder.CreateSphere(
+            'Pull keel edge',
+            { diameter: 0.28 },
+            scene,
+          );
+          h.parent = root;
+          h.position.set(0, 0.4 - design.depths[row], 1.5 - row);
+          h.material = blue;
+          h.metadata = { row, axis: 'depth', side: 1 };
+          // Bring the keel handle through the water visually while editing.
+          h.renderingGroupId = 1;
+        }
         patch(
           'transom',
           [stern[0], stern[1], stern[2], stern[3]],
@@ -360,7 +434,8 @@ export default function BoatScene({
         if (!engine) return;
         const delta = Math.min(engine.getDeltaTime() / 1000, 0.05);
         time += delta;
-        const moving = live.current.running,
+        const test = live.current.trial;
+        const moving = live.current.running || !!test,
           wave = live.current.waves;
         root.position.y =
           baseline +
@@ -369,13 +444,28 @@ export default function BoatScene({
         root.rotation.z =
           -hydro.lateral * 0.002 + Math.sin(time * 1.8) * wave * 0.035;
         root.rotation.x = hydro.trim * 0.001 + (moving ? -0.025 : 0);
+        if (test) {
+          const slam = Math.max(0, Math.sin(time * 5));
+          root.rotation.z =
+            (-test.heel * Math.PI) / 180 + Math.sin(time * 2) * wave * 0.025;
+          root.rotation.x += Math.sin(time * 5) * test.impact * 0.0012;
+          root.position.y += slam * test.impact * 0.001;
+          dark.emissiveColor.set(test.strain / 140, test.strain / 600, 0);
+          const motor = scene.getMeshByName('engine');
+          if (motor)
+            motor.rotation.z = Math.sin(time * 45) * test.strain * 0.0005;
+        }
+        if (editMode) {
+          root.rotation.set(0, 0, 0);
+          root.position.y = baseline;
+        }
         if (moving) {
           ripples.forEach((b) => {
-            b.position.z -= delta * hydro.knots * 0.2;
+            b.position.z -= delta * (test?.speed ?? hydro.knots) * 0.2;
             if (b.position.z < -18) b.position.z = 18;
           });
           buoys.forEach((b) => {
-            b.position.z -= delta * hydro.knots * 0.2;
+            b.position.z -= delta * (test?.speed ?? hydro.knots) * 0.2;
             if (b.position.z < -24) b.position.z += 48;
           });
         }
@@ -390,7 +480,7 @@ export default function BoatScene({
           : 0;
         roots.forEach((boat, i) => {
           if (i > 0) {
-            boat.setEnabled(moving);
+            boat.setEnabled(live.current.running);
             const opponent = raceData!.opponents[i - 1];
             const relative =
               Math.min(1, simulatedTime / opponent.elapsedSeconds) -
@@ -435,19 +525,106 @@ export default function BoatScene({
         resize.disconnect();
         engine?.stopRenderLoop();
         scene.dispose();
+        sceneRef.current = null;
       };
     } catch {
       setError(true);
       engine?.dispose();
       renderer.current = null;
     }
-  }, [design, entrants]);
+  }, [design, entrants, editMode, selectedPanel]);
   return (
     <>
       <canvas
         ref={canvas}
         aria-label="Interactive 3D boat preview. Drag to rotate and pinch to zoom."
         role="img"
+        style={{ touchAction: 'none' }}
+        onPointerDown={(e) => {
+          const scene = sceneRef.current;
+          if (!editMode || !scene || !canvas.current) return;
+          const rect = canvas.current.getBoundingClientRect();
+          const px = e.clientX - rect.left, py = e.clientY - rect.top;
+          const handle = scene.pick(px, py, (mesh) => !!mesh.metadata?.axis);
+          const picked = handle?.hit ? handle : scene.pick(px, py, (mesh) => mesh.metadata?.slot !== undefined);
+          const mesh = picked?.pickedMesh;
+          if (!mesh) return;
+          const meta = mesh.metadata;
+          if (meta.slot !== undefined) {
+            onSelectPanel?.(meta.slot);
+            return;
+          }
+          const camera = scene.activeCamera!;
+          const viewport = camera.viewport.toGlobal(rect.width, rect.height);
+          const position = mesh.getAbsolutePosition();
+          const direction =
+            meta.axis === 'width'
+              ? new Vector3(meta.side, 0, 0)
+              : new Vector3(0, -1, 0);
+          const a = Vector3.Project(
+            position,
+            Matrix.Identity(),
+            scene.getTransformMatrix(),
+            viewport,
+          );
+          const b = Vector3.Project(
+            position.add(direction),
+            Matrix.Identity(),
+            scene.getTransformMatrix(),
+            viewport,
+          );
+          if ((b.x - a.x) ** 2 + (b.y - a.y) ** 2 < 4) return;
+          handleDrag.current = {
+            row: meta.row,
+            axis: meta.axis,
+            x: e.clientX,
+            y: e.clientY,
+            dx: b.x - a.x,
+            dy: b.y - a.y,
+            value:
+              meta.axis === 'width'
+                ? design.widths[meta.row] / 100
+                : design.depths[meta.row],
+            design,
+          };
+          onEditStart?.();
+          camera.detachControl();
+          e.currentTarget.setPointerCapture(e.pointerId);
+        }}
+        onPointerMove={(e) => {
+          const d = handleDrag.current;
+          if (!d) return;
+          const change =
+            ((e.clientX - d.x) * d.dx + (e.clientY - d.y) * d.dy) /
+            (d.dx * d.dx + d.dy * d.dy);
+          if (d.axis === 'width') {
+            const widths = d.design.widths.slice();
+            widths[d.row] = Math.round(
+              Math.max(25, Math.min(100, (d.value + change) * 100)),
+            );
+            onDesign?.({ widths });
+          } else {
+            const depths = d.design.depths.slice();
+            depths[d.row] =
+              Math.round(
+                Math.max(0.25, Math.min(1.2, d.value + change)) * 100,
+              ) / 100;
+            onDesign?.({ depths });
+          }
+        }}
+        onPointerUp={(e) => {
+          if (!handleDrag.current) return;
+          handleDrag.current = null;
+          onEditEnd?.();
+          if (e.currentTarget.hasPointerCapture(e.pointerId))
+            e.currentTarget.releasePointerCapture(e.pointerId);
+          sceneRef.current?.activeCamera?.attachControl(canvas.current!, true);
+        }}
+        onPointerCancel={() => {
+          handleDrag.current = null;
+          onEditEnd?.();
+          sceneRef.current?.activeCamera?.attachControl(canvas.current!, true);
+        }}
       />
       {error && (
         <p className="error-scene">
