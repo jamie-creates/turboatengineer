@@ -26,6 +26,7 @@ import {
   stats,
   runEvent,
   raceFrame,
+  raceRisk,
   simulateRace,
   coursePoint,
   readSave,
@@ -143,7 +144,7 @@ export default function Home() {
                 },
               },
               activeChallenge.current,
-              r.place,
+              r.dynamics.outcome === 'finished' ? r.place : 0,
             ),
           );
         }
@@ -288,8 +289,8 @@ export default function Home() {
         entrants.elapsedSeconds,
         ...entrants.opponents.map((o) => o.elapsedSeconds),
       ) *
-        progress) /
-      100
+        Math.min(progress, 90)) /
+      90
     : 0;
   const liveFrame =
     entrants && running ? raceFrame(entrants.dynamics, raceTime) : null;
@@ -305,6 +306,14 @@ export default function Home() {
         .map((o) => ({ ...o, frame: raceFrame(o.dynamics, raceTime) }))
         .sort(
           (a, b) =>
+            Number(
+              a.dynamics.outcome !== 'finished' &&
+                raceTime >= a.dynamics.duration,
+            ) -
+              Number(
+                b.dynamics.outcome !== 'finished' &&
+                  raceTime >= b.dynamics.duration,
+              ) ||
             b.frame.distance - a.frame.distance ||
             a.dynamics.duration - b.dynamics.duration,
         )
@@ -585,6 +594,15 @@ export default function Home() {
               />
             </div>
           )}
+          {!running && (
+            <div aria-live="polite">
+              {raceRisk(design, eventId).map((w) => (
+                <p className="notice" key={w}>
+                  {w}
+                </p>
+              ))}
+            </div>
+          )}
           {s.missing > 0 && (
             <output className="notice">
               Close {s.missing} open hull section{s.missing === 1 ? '' : 's'}{' '}
@@ -642,7 +660,7 @@ export default function Home() {
                       <span>
                         {boat.frame.phase === 'Finished'
                           ? 'Finished'
-                          : `${(boat.frame.speed * 1.94384).toFixed(1)} kn · ${boat.frame.phase}`}
+                          : `${(boat.frame.speed * 1.94384).toFixed(1)} kn · ${boat.frame.phase} · ${Math.round(boat.frame.damage * 100)}% damage`}
                       </span>
                     </li>
                   ))}
@@ -762,18 +780,24 @@ export default function Home() {
               <div className="result-heading">
                 <Trophy size={30} />
                 <strong>
-                  {['1st', '2nd', '3rd', '4th'][result.place - 1]}
+                  {result.dynamics.outcome === 'finished'
+                    ? ['1st', '2nd', '3rd', '4th'][result.place - 1]
+                    : 'DNF'}
                 </strong>
                 <div>
                   <h2>
-                    {result.opponents.length
-                      ? 'of ' + (result.opponents.length + 1) + ' boats'
-                      : result.score + '/100 overall'}
+                    {result.dynamics.outcome !== 'finished'
+                      ? result.dynamics.outcome === 'capsized'
+                        ? 'Capsized'
+                        : 'Hull failure'
+                      : result.opponents.length
+                        ? 'of ' + (result.opponents.length + 1) + ' boats'
+                        : result.score + '/100 overall'}
                   </h2>
                   <p>
                     {Math.floor(result.elapsedSeconds / 60)}m{' '}
-                    {Math.floor(result.elapsedSeconds % 60)}s simulated course
-                    time · {result.courseKnots}kn over course
+                    {Math.floor(result.elapsedSeconds % 60)}s simulated time ·{' '}
+                    {result.courseKnots}kn over course
                   </p>
                   <p>
                     +{result.credits} credits · +{result.xp} reputation
@@ -782,10 +806,10 @@ export default function Home() {
               </div>
               <p className="weight-note">
                 {result.opponents.length
-                  ? 'Head-to-head placing uses estimated finish time. Your four-category design score: ' +
+                  ? 'Finishers rank by time; failed boats rank by distance reached. Your design score: ' +
                     result.score +
                     '/100.'
-                  : 'Solo placing combines all four scores using this event\u0027s judging weights.'}
+                  : 'Finished solo runs use the event judging weights. Failed runs earn no rewards.'}
               </p>
               {result.opponents.length > 0 && (
                 <div className="standings">
@@ -802,6 +826,7 @@ export default function Home() {
                           {entry.name}
                         </span>
                         <span>
+                          {entry.outcome !== 'finished' ? 'DNF · ' : ''}
                           {Math.floor(entry.elapsedSeconds / 60)}:
                           {String(
                             Math.floor(entry.elapsedSeconds % 60),
@@ -818,8 +843,22 @@ export default function Home() {
                   <li key={t}>{t}</li>
                 ))}
               </ul>
+              {result.dynamics.outcome !== 'finished' && (
+                <p className="notice">
+                  {result.dynamics.outcome === 'capsized'
+                    ? 'The boat lost stability and rolled over. Widen the hull, center the load, or use less engine power.'
+                    : 'Structural damage ended this race. Replace weak hull/transom material and brace the engine mount.'}{' '}
+                  No rewards earned. Your design is kept and reset for workshop
+                  repairs.
+                </p>
+              )}
               <h3>What happened on the course</h3>
               <ul>
+                <li>
+                  {result.dynamics.roughWaterReduction > 5
+                    ? `Waves relative to your freeboard limited cruising pace by ${result.dynamics.roughWaterReduction}%. A deeper hull, less load, or a V bottom can restore rough-water pace.`
+                    : 'Your hull had enough clearance for this course; rough-water pace limiting was minimal.'}
+                </li>
                 <li>
                   {result.dynamics.accelerationSeconds
                     ? `Reached 90% of cruising speed in ${result.dynamics.accelerationSeconds} seconds. Less weight or more engine power improves the launch.`
@@ -859,15 +898,24 @@ export default function Home() {
                     </thead>
                     <tbody>
                       <tr>
-                        <td>Simulated course time</td>
+                        <td>Time / outcome</td>
                         <td>
+                          {simulateRace(comparison.design, eventId).outcome !==
+                          'finished'
+                            ? 'DNF · '
+                            : ''}
                           {simulateRace(
                             comparison.design,
                             eventId,
                           ).duration.toFixed(1)}{' '}
                           s
                         </td>
-                        <td>{result.elapsedSeconds.toFixed(1)} s</td>
+                        <td>
+                          {result.dynamics.outcome !== 'finished'
+                            ? 'DNF · '
+                            : ''}
+                          {result.elapsedSeconds.toFixed(1)} s
+                        </td>
                       </tr>
                       <tr>
                         <td>Weight</td>

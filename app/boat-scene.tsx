@@ -484,8 +484,8 @@ export default function BoatScene({
               raceData.elapsedSeconds,
               ...raceData.opponents.map((o) => o.elapsedSeconds),
             ) *
-              live.current.progress) /
-            100
+              Math.min(live.current.progress, 90)) /
+            90
           : 0;
         const playerFrame = raceData
           ? raceFrame(raceData.dynamics, simulatedTime)
@@ -520,15 +520,43 @@ export default function BoatScene({
               boatStats[i].physics.freeboard -
                 0.74 +
                 Math.sin(simulatedTime * 3 + i) * wave * 0.025 +
-                frame.impact * 0.08,
+                frame.impact * 0.08 -
+                (frame.phase === 'Hull failure' ? 0.5 : 0),
               (p.z - playerPoint.z) * 0.18 - Math.sin(p.heading) * lane,
             );
             boat.rotation.set(frame.pitch, p.heading, -frame.heel);
+            for (const mesh of boat.getChildMeshes()) {
+              if (mesh.metadata?.slot !== undefined) {
+                mesh.overlayColor = new Color3(0.8, 0.15, 0.06);
+                mesh.overlayAlpha = frame.damage * 0.6;
+                mesh.renderOverlay = frame.damage > 0.1;
+                if (
+                  frame.phase === 'Hull failure' &&
+                  mesh.metadata.slot % 3 === 0
+                )
+                  mesh.visibility = 0.25;
+              }
+            }
           } else if (i === 0) {
             boat.position.x = 0;
             boat.position.z = 0;
             boat.rotation.y = 0;
           }
+          if (!live.current.running && !editMode)
+            for (const mesh of boat.getChildMeshes()) {
+              mesh.renderOverlay = false;
+              mesh.visibility = 1;
+            }
+          const outcomeData = raceData
+            ? i === 0
+              ? raceData.dynamics
+              : raceData.opponents[i - 1].dynamics
+            : null;
+          const failed =
+            live.current.running &&
+            outcomeData &&
+            outcomeData.outcome !== 'finished' &&
+            simulatedTime >= outcomeData.duration;
           boat.computeWorldMatrix(true);
           waterMat.setMatrix(
             'inverseBoat' + i,
@@ -536,7 +564,9 @@ export default function BoatScene({
           );
           waterMat.setFloat(
             'sealed' + i,
-            boatStats[i].missing === 0 && (i === 0 || moving) ? 1 : 0,
+            boatStats[i].missing === 0 && (i === 0 || moving) && !failed
+              ? 1
+              : 0,
           );
         });
         ripples.forEach((r) =>

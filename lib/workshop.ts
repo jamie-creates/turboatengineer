@@ -1,5 +1,7 @@
 import {
   stats,
+  compareFinish,
+  raceHandling,
   engineSpec,
   runEvent,
   initial,
@@ -10,7 +12,8 @@ import {
 export function seaTrial(d: Design, waves: number, wind: number, throttle = 1) {
   const s = stats(d, waves, wind);
   const power = Math.max(0, Math.min(1, throttle));
-  const speed = s.knots * Math.cbrt(power);
+  const speed =
+    s.knots * raceHandling(d, s, waves).roughPace * Math.cbrt(power);
   const heel = Math.max(
     -25,
     Math.min(25, (s.lateral * 0.22) / Math.max(0.3, s.physics.gm + 0.3)),
@@ -128,6 +131,8 @@ export function careerRace(s: Save, id: string) {
       elapsedSeconds: player.elapsedSeconds,
       courseKnots: player.courseKnots,
       color: s.design.color,
+      outcome: player.dynamics.outcome,
+      distance: player.dynamics.distance,
     },
     {
       name: rival.name,
@@ -135,16 +140,19 @@ export function careerRace(s: Save, id: string) {
       elapsedSeconds: rival.elapsedSeconds,
       courseKnots: rival.courseKnots,
       color: rival.design.color,
+      outcome: rival.dynamics.outcome,
+      distance: rival.dynamics.distance,
     },
-  ].sort((a, b) => a.elapsedSeconds - b.elapsedSeconds);
+  ].sort(compareFinish);
   const place = standings.findIndex((v) => v.isPlayer) + 1;
   return {
     ...player,
     opponents: [rival],
     standings,
     place,
-    credits: place === 1 ? 100 : 40,
-    xp: place === 1 ? 25 : 15,
+    credits:
+      player.dynamics.outcome !== 'finished' ? 0 : place === 1 ? 100 : 40,
+    xp: player.dynamics.outcome !== 'finished' ? 0 : place === 1 ? 25 : 15,
   };
 }
 

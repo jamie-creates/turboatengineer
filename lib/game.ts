@@ -651,20 +651,25 @@ export function race(d: Design, eventId: number) {
   const dynamics = simulateRace(d, eventId);
   const elapsedSeconds = dynamics.duration;
   const courseKnots =
-    Math.round((event.distance / elapsedSeconds) * 1.94384 * 10) / 10;
+    Math.round((dynamics.distance / elapsedSeconds) * 1.94384 * 10) / 10;
   const score = Math.round(
     result.scores.reduce((sum, v, i) => sum + v * event.weights[i], 0),
   );
   const place =
-    score >= event.target + 8
-      ? 1
-      : score >= event.target
-        ? 2
-        : score >= event.target - 9
-          ? 3
-          : 4;
-  const credits = Math.round(event.reward * [1, 0.75, 0.5, 0.3][place - 1]),
-    xp = [35, 25, 20, 15][place - 1],
+    dynamics.outcome !== 'finished'
+      ? 4
+      : score >= event.target + 8
+        ? 1
+        : score >= event.target
+          ? 2
+          : score >= event.target - 9
+            ? 3
+            : 4;
+  const credits =
+      dynamics.outcome !== 'finished'
+        ? 0
+        : Math.round(event.reward * [1, 0.75, 0.5, 0.3][place - 1]),
+    xp = dynamics.outcome !== 'finished' ? 0 : [35, 25, 20, 15][place - 1],
     tips = [];
   if (result.imbalance > 12)
     tips.push(
@@ -680,7 +685,7 @@ export function race(d: Design, eventId: number) {
     );
   if (event.waves > 0.5 && d.hull === 'skiff')
     tips.push('A deep-V cross section softens wave impacts on this course.');
-  if (result.scores[0] < 55)
+  if (result.scores[0] < 55 && dynamics.outcome === 'finished')
     tips.push(
       'Replace heavy panels with lighter material, or try more engine power.',
     );
@@ -959,6 +964,8 @@ export function runEvent(
       elapsedSeconds: base.elapsedSeconds,
       courseKnots: base.courseKnots,
       color: design.color,
+      outcome: base.dynamics.outcome,
+      distance: base.dynamics.distance,
     },
     ...opponents.map((o) => ({
       name: o.name,
@@ -966,16 +973,26 @@ export function runEvent(
       elapsedSeconds: o.elapsedSeconds,
       courseKnots: o.courseKnots,
       color: o.design.color,
+      outcome: o.dynamics.outcome,
+      distance: o.dynamics.distance,
     })),
-  ].sort((a, b) => a.elapsedSeconds - b.elapsedSeconds);
+  ].sort(compareFinish);
   const place = count ? standings.findIndex((s) => s.isPlayer) + 1 : base.place;
   return {
     ...base,
     place,
-    credits: count
-      ? Math.round(events[eventId].reward * [1, 0.75, 0.5, 0.3][place - 1])
-      : base.credits,
-    xp: count ? [35, 25, 20, 15][place - 1] : base.xp,
+    credits:
+      base.dynamics.outcome !== 'finished'
+        ? 0
+        : count
+          ? Math.round(events[eventId].reward * [1, 0.75, 0.5, 0.3][place - 1])
+          : base.credits,
+    xp:
+      base.dynamics.outcome !== 'finished'
+        ? 0
+        : count
+          ? [35, 25, 20, 15][place - 1]
+          : base.xp,
     opponents,
     standings,
   };
@@ -991,6 +1008,7 @@ export type RaceFrame = {
   pitch: number;
   impact: number;
   phase: string;
+  damage: number;
 };
 const courseCache = new Map<
   number,
@@ -1039,21 +1057,40 @@ export function coursePoint(distance: number, eventId: number) {
     curve: a.curve + (b.curve - a.curve) * f,
   };
 }
+// A handling envelope supplements straight-line drag. Calm water preserves the
+// light-hull advantage; waves relative to freeboard demand a slower safe pace.
+// This is a game estimate, not a calibrated capsize or seaworthiness prediction.
+export function raceHandling(
+  d: Design,
+  s: ReturnType<typeof stats>,
+  waves: number,
+) {
+  const clearanceLoad = Math.max(
+    0,
+    waves / Math.max(0.08, s.physics.freeboard) - 0.5,
+  );
+  const roughPace =
+    1 / Math.sqrt(1 + clearanceLoad ** 2 * (d.hull === 'v' ? 0.1 : 0.18));
+  const stability = Math.max(0, Math.min(1, s.physics.gm / 0.35));
+  return { roughPace, turnGrip: 0.55 + stability * 0.45 };
+}
 export function simulateRace(d: Design, eventId: number) {
   const event = events[eventId];
   if (!event) throw new Error('Unknown event');
   const s = stats(d, event.waves, event.wind);
   if (s.missing || s.unsafe)
     throw new Error('Boat must be sealed and buoyant.');
-  const top = s.physics.speed,
+  const handling = raceHandling(d, s, event.waves);
+  const top = s.physics.speed * handling.roughPace,
     mass = s.mass * 1.2,
     power = engineSpec(d).hp * 746 * 0.25;
   const grip = Math.max(
     0.08,
-    0.22 -
+    (0.22 -
       Math.abs(s.lateral) * 0.0015 -
       s.smoothness * 0.001 +
-      (d.hull === 'v' ? 0.015 : 0),
+      (d.hull === 'v' ? 0.015 : 0)) *
+      handling.turnGrip,
   );
   const frames: RaceFrame[] = [
     {
@@ -1064,6 +1101,7 @@ export function simulateRace(d: Design, eventId: number) {
       pitch: 0,
       impact: 0,
       phase: 'Accelerating',
+      damage: 0,
     },
   ];
   let time = 0,
@@ -1074,7 +1112,18 @@ export function simulateRace(d: Design, eventId: number) {
     straightTotal = 0,
     straightSamples = 0,
     impactTotal = 0,
-    accelerationSeconds = 0;
+    accelerationSeconds = 0,
+    damage = 0,
+    capsizeExposure = 0;
+  let outcome: 'finished' | 'capsized' | 'broken' = 'finished';
+  const weakest = Math.min(
+    ...slots.map(
+      (i) =>
+        materials[d.panels[i]!.material].strength +
+        (d.panels[i]!.braced ? 25 : 0),
+    ),
+  );
+  const mountStrength = materials[d.panels[d.engineSlot]!.material].strength;
   const dt = 0.25;
   while (distance < event.distance && time < 7200) {
     const curve = coursePoint(distance, eventId).curve;
@@ -1122,31 +1171,71 @@ export function simulateRace(d: Design, eventId: number) {
       straightSamples++;
     }
     impactTotal += impact * dt * fraction;
+    const roll =
+      ((curve * speed * speed) / 9.81) * 0.7 -
+      s.lateral * 0.002 +
+      (((engineSpec(d).hp / 25) * 0.04) / Math.max(0.08, s.physics.gm + 0.15)) *
+        Math.min(1, speed / Math.max(1, top)) +
+      (Math.sin(time * 1.6) * event.waves * 0.025) /
+        Math.max(0.03, s.physics.gm + 0.05);
+    capsizeExposure =
+      Math.abs(roll) > 0.72
+        ? capsizeExposure + dt * fraction
+        : Math.max(0, capsizeExposure - dt * 0.5);
+    const hullStress =
+      ((event.waves *
+        speed ** 2 *
+        (d.hull === 'v' ? 0.4 : 0.8) *
+        (1 + Math.abs(s.trim) / 150)) /
+        weakest) *
+      wavePulse;
+    const mountStress =
+      (engineSpec(d).hp *
+        (0.65 + event.waves) *
+        (s.engineSupported ? 0.25 : 1)) /
+      mountStrength;
+    const oceanPlywood =
+      event.waves >= 1 &&
+      (slots.some((i) => d.panels[i]?.material === 0) || d.sternMaterial === 0);
+    damage = Math.min(
+      1,
+      damage +
+        (oceanPlywood ? 0.035 * dt * fraction : 0) +
+        Math.max(0, Math.max(hullStress, mountStress) - 1) *
+          dt *
+          fraction *
+          0.035,
+    );
+    if (distance < event.distance) {
+      if (capsizeExposure > 0.35) outcome = 'capsized';
+      else if (damage >= 1) outcome = 'broken';
+    }
     frames.push({
       time,
       distance,
       speed,
-      heel:
-        Math.max(
-          -0.28,
-          Math.min(0.28, ((curve * speed * speed) / 9.81) * 0.7),
-        ) -
-        s.lateral * 0.002,
+      heel: outcome === 'capsized' ? Math.PI : roll,
+      damage,
       pitch: -acceleration * 0.025 + impact * 0.1,
       impact,
       phase:
-        distance === event.distance
-          ? 'Finished'
-          : curvature > 0.001
-            ? 'Cornering'
-            : impact > 0.15
-              ? 'Wave impact'
-              : acceleration > 0.08
-                ? 'Accelerating'
-                : 'Cruising',
+        outcome === 'capsized'
+          ? 'Capsized'
+          : outcome === 'broken'
+            ? 'Hull failure'
+            : distance === event.distance
+              ? 'Finished'
+              : curvature > 0.001
+                ? 'Cornering'
+                : impact > 0.15
+                  ? 'Wave impact'
+                  : acceleration > 0.08
+                    ? 'Accelerating'
+                    : 'Cruising',
     });
+    if (outcome !== 'finished') break;
   }
-  if (distance < event.distance)
+  if (distance < event.distance && outcome === 'finished')
     throw new Error('Boat could not complete the course.');
   const turnLoss =
     cornerSamples && straightSamples
@@ -1162,6 +1251,9 @@ export function simulateRace(d: Design, eventId: number) {
   return {
     frames,
     duration: time,
+    outcome,
+    distance,
+    roughWaterReduction: Math.round((1 - handling.roughPace) * 100),
     eventId,
     turnLoss,
     accelerationSeconds: Math.round(accelerationSeconds * 10) / 10,
@@ -1174,7 +1266,16 @@ export function raceFrame(
 ): RaceFrame {
   const frames = dynamics.frames;
   if (time >= dynamics.duration)
-    return { ...frames[frames.length - 1], speed: 0, phase: 'Finished' };
+    return {
+      ...frames[frames.length - 1],
+      speed: 0,
+      phase:
+        dynamics.outcome === 'finished'
+          ? 'Finished'
+          : dynamics.outcome === 'capsized'
+            ? 'Capsized'
+            : 'Hull failure',
+    };
   const i = Math.min(frames.length - 1, Math.max(0, Math.floor(time / 0.25))),
     a = frames[i],
     b = frames[Math.min(i + 1, frames.length - 1)];
@@ -1190,5 +1291,44 @@ export function raceFrame(
     pitch: a.pitch + (b.pitch - a.pitch) * f,
     impact: a.impact + (b.impact - a.impact) * f,
     phase: a.phase,
+    damage: a.damage + (b.damage - a.damage) * f,
   };
+}
+
+export function compareFinish(
+  a: { outcome: string; distance: number; elapsedSeconds: number },
+  b: { outcome: string; distance: number; elapsedSeconds: number },
+) {
+  const af = a.outcome === 'finished',
+    bf = b.outcome === 'finished';
+  return af !== bf
+    ? af
+      ? -1
+      : 1
+    : af
+      ? a.elapsedSeconds - b.elapsedSeconds
+      : b.distance - a.distance;
+}
+export function raceRisk(d: Design, eventId: number) {
+  const s = stats(d, events[eventId].waves, events[eventId].wind),
+    e = events[eventId];
+  const roll =
+    ((engineSpec(d).hp / 25) * 0.04) / Math.max(0.08, s.physics.gm + 0.15) +
+    (e.waves * 0.025) / Math.max(0.03, s.physics.gm + 0.05) +
+    Math.abs(s.lateral) * 0.002;
+  const mount =
+    (engineSpec(d).hp * (0.65 + e.waves) * (s.engineSupported ? 0.25 : 1)) /
+    materials[d.panels[d.engineSlot]?.material ?? 0].strength;
+  return [
+    e.waves >= 1 &&
+    (slots.some((i) => d.panels[i]?.material === 0) || d.sternMaterial === 0)
+      ? 'Ocean failure: plywood hull panels and transoms will break in these waves. Replace them; plywood seats are fine.'
+      : '',
+    roll > 0.55
+      ? 'Capsize risk: this hull has little stability for these waves. Widen it or center the load.'
+      : '',
+    mount > 1
+      ? 'Structural risk: the engine mount is overloaded. Brace it or use a stronger panel.'
+      : '',
+  ].filter(Boolean);
 }
